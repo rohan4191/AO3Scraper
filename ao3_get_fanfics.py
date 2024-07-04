@@ -249,7 +249,19 @@ def write_fic_to_csv(fic_id, only_first_chap, lang, include_bookmarks, metadata_
 				chaptertext = '\n\n'.join([unidecode(chapter.text) for chapter in chapters])
 			else:
 				chaptertext = ""
-			row = [fic_id] + [title] + [author] + list(map(lambda x: ', '.join(x), tags)) + stats + [all_kudos] + [all_bookmarks] + [chaptertext]
+
+			# Write fic body to .txt in directory fics/
+			fic_ids, _, _, _, _, _, _, _, _ = get_args()
+			dir = fic_ids[0][:fic_ids[0].find(".")]
+			if not os.path.exists(dir):
+				os.mkdir(dir)
+
+			fic_path = dir + "/" + str(fic_id) + ".txt"
+			with open(fic_path, 'w') as f:
+				f.write(chaptertext)
+
+			# Change csv format to have path to txt with fic body
+			row = [fic_id] + [title] + [author] + list(map(lambda x: ', '.join(x), tags)) + stats + [all_kudos] + [all_bookmarks] + [fic_path]
 			try:
 				writer.writerow(row)
 			except:
@@ -322,6 +334,8 @@ def main():
 	if (output_directory and not os.path.isdir(output_directory)):
 		print("Creating output directory " + output_directory)
 		os.mkdir(output_directory)
+
+	csv_out = fic_ids[0][:fic_ids[0].find(".")] + "metadata.csv"
 	with open(csv_out, 'a', newline="") as f_out:
 		writer = csv.writer(f_out)
 		with open(os.path.join(os.path.dirname(csv_out), "errors_" + os.path.basename(csv_out)), 'a', newline="") as e_out:
@@ -329,7 +343,7 @@ def main():
 			#does the csv already exist? if not, let's write a header row.
 			if os.stat(csv_out).st_size == 0:
 				print('Writing a header row for the csv.')
-				header = ['work_id', 'title', 'author', 'rating', 'category', 'fandom', 'relationship', 'character', 'additional tags', 'language', 'published', 'status', 'status date', 'words', 'chapters', 'comments', 'kudos', 'bookmarks', 'hits', 'all_kudos', 'all_bookmarks', 'body']
+				header = ['work_id', 'title', 'author', 'rating', 'category', 'fandom', 'relationship', 'character', 'additional tags', 'language', 'published', 'status', 'status date', 'words', 'chapters', 'comments', 'kudos', 'bookmarks', 'hits', 'all_kudos', 'all_bookmarks', 'path']
 				writer.writerow(header)
 			if is_csv:
 				csv_fname = fic_ids[0]
