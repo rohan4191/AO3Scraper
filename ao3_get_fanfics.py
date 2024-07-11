@@ -35,12 +35,6 @@
 # Author: Jingyi Li soundtracknoon [at] gmail
 # I wrote this in Python 2.7. 9/23/16
 # Updated 2/13/18 (also Python3 compatible)
-#
-#
-# Update 2/3/21
-# jack-debug
-# I added a new argument that only gets fanfics of a certain language
-# --lang
 #######
 import requests
 from bs4 import BeautifulSoup
@@ -54,15 +48,6 @@ from unidecode import unidecode
 # seconds to wait between page requests
 delay = 5
 
-def get_tag_info(category, meta):
-	'''
-	given a category and a 'work meta group, returns a list of tags (eg, 'rating' -> 'explicit')
-	'''
-	try:
-		tag_list = meta.find("dd", class_=str(category) + ' tags').find_all(class_="tag")
-	except AttributeError as e:
-		return []
-	return [unidecode(result.text) for result in tag_list] 
 	
 def get_stats(meta):
 	'''
@@ -92,6 +77,16 @@ def get_stats(meta):
 	stats.insert(2, status)
 
 	return stats      
+
+def get_tag_info(category, meta):
+	'''
+	given a category and a 'work meta group, returns a list of tags (eg, 'rating' -> 'explicit')
+	'''
+	try:
+		tag_list = meta.find("dd", class_=str(category) + ' tags').find_all(class_="tag")
+	except AttributeError as e:
+		return []
+	return [unidecode(result.text) for result in tag_list] 
 
 def get_tags(meta):
 	'''
@@ -229,19 +224,10 @@ def write_fic_to_csv(fic_id, only_first_chap, lang, include_bookmarks, metadata_
 		tags = get_tags(meta)
 		stats = get_stats(meta)
 		title = unidecode(soup.find("h2", class_="title heading").string).strip()
-		visible_kudos = get_kudos(soup.find('p', class_='kudos'))
-		hidden_kudos = get_kudos(soup.find('span', class_='kudos_expanded hidden'))
-		all_kudos = visible_kudos + hidden_kudos
 
 		if lang != False and lang != stats[0]:
 			print('Fic is not in ' + lang + ', skipping...')
 		else:
-			#get bookmarks
-			if (include_bookmarks):
-				bookmark_url = 'http://archiveofourown.org/works/'+str(fic_id)+'/bookmarks'
-				all_bookmarks = get_bookmarks(bookmark_url, header_info)
-			else:
-				all_bookmarks = []
 			#get the fic itself
 			if not metadata_only:
 				content = soup.find("div", id= "chapters")
@@ -261,7 +247,7 @@ def write_fic_to_csv(fic_id, only_first_chap, lang, include_bookmarks, metadata_
 				f.write(chaptertext)
 
 			# Change csv format to have path to txt with fic body
-			row = [fic_id] + [title] + [author] + list(map(lambda x: ', '.join(x), tags)) + stats + [all_kudos] + [all_bookmarks] + [fic_path]
+			row = [fic_id] + [title] + [author] + list(map(lambda x: ', '.join(x), tags)) + stats + [fic_path]
 			try:
 				writer.writerow(row)
 			except:
@@ -314,9 +300,6 @@ def get_args():
 		lang = False
 	return fic_ids, csv_out, headers, restart, is_csv, ofc, lang, include_bookmarks, metadata_only
 
-'''
-
-'''
 def process_id(fic_id, restart, found):
 	if found:
 		return True
@@ -343,7 +326,7 @@ def main():
 			#does the csv already exist? if not, let's write a header row.
 			if os.stat(csv_out).st_size == 0:
 				print('Writing a header row for the csv.')
-				header = ['work_id', 'title', 'author', 'rating', 'category', 'fandom', 'relationship', 'character', 'additional tags', 'language', 'published', 'status', 'status date', 'words', 'chapters', 'comments', 'kudos', 'bookmarks', 'hits', 'all_kudos', 'all_bookmarks', 'path']
+				header = ['work_id', 'title', 'author', 'rating', 'category', 'fandom', 'relationship', 'character', 'additional tags', 'language', 'published', 'status', 'status date', 'words', 'chapters', 'comments', 'kudos', 'bookmarks', 'hits', 'path']
 				writer.writerow(header)
 			if is_csv:
 				csv_fname = fic_ids[0]
