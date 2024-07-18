@@ -128,10 +128,10 @@ def write_fic_to_db(fic_id):
         title = unidecode(soup.find("h2", class_="title heading").string).strip()
         
     #get the fic itself
-    content = soup.find("div", id= "chapters")
-    chapters = content.select('p')
-    chaptertext = '\n\n'.join([unidecode(chapter.text) for chapter in chapters])
-
+    content = soup.find_all("div", class_ = "chapter")
+    if not content:
+        content = [soup.find("div", id = "chapters")] # if single chapter work, do this
+            
     # connect to database
     db = mysql.connector.connect(
         host = "localhost",
@@ -143,19 +143,68 @@ def write_fic_to_db(fic_id):
     cursor = db.cursor()
 
     # write metadata to table
-    sql = "INSERT INTO fics VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
-           # VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+    #     tags = ['rating', 'category', 'fandom', 'relationship', 'character', 'freeform']
+    #     categories = ['language', 'published', 'status', 'date status', 'words', 'chapters', 'comments', 'kudos', 'bookmarks', 'hits'] 
+    sql = "INSERT INTO works VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
     val = (fic_id, title, ", ".join(author), ", ".join(tags[0]), ", ".join(tags[1]), ", ".join(tags[2]), ", ".join(tags[3]), ", ".join(tags[4]), ", ".join(tags[5]), \
            stats[0], stats[1], stats[2], stats[3], int(stats[4].replace(',', '')), stats[5], int(stats[6].replace(',', '')), int(stats[7].replace(',', '')), int(stats[8].replace(',', '')), int(stats[9].replace(',', '')))
     cursor.execute(sql, val)
-    db.commit()
  
-    # write fic to table
-    #     tags = ['rating', 'category', 'fandom', 'relationship', 'character', 'freeform']
-    #     categories = ['language', 'published', 'status', 'date status', 'words', 'chapters', 'comments', 'kudos', 'bookmarks', 'hits'] 
+ 
+    # write fic chaps to table
+    # [work id, chapter number, chapter text]
+    sql = "INSERT INTO chaps VALUES (%s, %s, %s, %s, %s, %s, %s)"
+    chapters = soup.select("div[class=chapter]")
+    # case for single-chapter work
+    if not chapters:
+        title = soup.select_one(".title.heading")
+        if title: title = title.text
+        
+        summary = soup.select_one(".summary.module")
+        if summary: summary = summary.text
+        
+        notes = soup.select_one(".notes.module")
+        if notes: notes = notes.text
+        
+        endnotes = soup.select_one(".end.notes.module")
+        if endnotes: endnotes = endnotes.text
+        
+        chapter = soup.select_one("div[id=chapters]")
+        body = chapter.select_one(".userstuff")
+        lines = body.select("p")
+        text = "\n".join([unidecode(line.text) for line in lines])
+        
+        val = (fic_id, 1, title, summary, notes, endnotes, text)
+        cursor.execute(sql, val)
+    
+    # multi-chapter case
+    else:
+        for i, chapter in enumerate(chapters):
+            title = chapter.select_one(".title")
+            if title: title = title.text
+            
+            summary = chapter.select_one("div[id=summary]")
+            if summary: summary = summary.text
+            
+            notes = chapter.select_one("div[id=notes]")
+            if notes: notes = notes.text
+            
+            endnotes = chapter.select_one(".end.notes.module")
+            if endnotes: endnotes = endnotes.text
+        
+            body = chapter.select_one(".userstuff.module")
+            lines = body.select("p")
+            text = "\n".join([unidecode(line.text) for line in lines])
+            
+            val = (fic_id, i + 1, title, summary, notes, endnotes, text)
+            cursor.execute(sql, val)
+            
  
     # write comments to table
+    # will have to scrape by chapter instead of by entire work...
+    # actually each comment specifies which chapter it was on....
 
+    db.commit()
     print('Done.')
 
 def get_args(): 
