@@ -24,9 +24,10 @@ import argparse
 import csv
 from unidecode import unidecode
 import mysql.connector
+from time import sleep
 
 # seconds to wait between page requests
-delay = 5
+delay = 2
 
     
 def get_stats(meta):
@@ -110,28 +111,7 @@ def access_denied(soup):
         return True
     return False
 
-def write_fic_to_db(fic_id):
-    print('Scraping ', fic_id)
-    url = 'http://archiveofourown.org/works/'+str(fic_id)+'?view_adult=true&amp;view_full_work=true'
-    print(url)
-    req = requests.get(url)
-
-    src = req.text
-    soup = BeautifulSoup(src, 'html.parser')
-    if (access_denied(soup)):
-        print('Access Denied')
-    else:
-        meta = soup.find("dl", class_="work meta group")
-        author = get_authors(soup.find("h3", class_="byline heading"))
-        tags = get_tags(meta)
-        stats = get_stats(meta)
-        title = unidecode(soup.find("h2", class_="title heading").string).strip()
-        
-    #get the fic itself
-    content = soup.find_all("div", class_ = "chapter")
-    if not content:
-        content = [soup.find("div", id = "chapters")] # if single chapter work, do this
-            
+def write_fic_to_db(fic_id, errorwriter):    
     # connect to database
     db = mysql.connector.connect(
         host = "localhost",
@@ -139,8 +119,59 @@ def write_fic_to_db(fic_id):
         password = "password",
         database = "fics"
     )
-    print(db)
     cursor = db.cursor()
+    
+    # check if work already in db, if so, pass
+    sql = "SELECT COUNT(*) FROM fics.works WHERE id = %s"
+    val = (fic_id, )
+    cursor.execute(sql, val)
+    if cursor.fetchone()[0] > 0:
+        print("Duplicate work:", fic_id)
+        return
+    
+    print('Scraping ', fic_id)
+    url = 'http://archiveofourown.org/works/'+str(fic_id)+'?view_adult=true&amp;view_full_work=true'
+    print(url)
+    
+    # if rate-limited, wait a minute
+    status = 429
+    while 429 == status:
+        req = requests.get(url)
+        status = req.status_code
+        if 429 == status:
+            print("Request answered with Status-Code 429")
+            print("Trying again in 1 minute...")
+            sleep(60)
+    # for other errors, write out to csv and pass
+    if 400 <= status:
+        print("Error scraping ", fic_id, "Status ", str(status))
+        error_row = [fic_id] + [status]
+        errorwriter.writerow(error_row)
+        return
+
+    # get html
+    src = req.text
+    soup = BeautifulSoup(src, 'html.parser')
+    
+    # if access denied, means it's a restricted work so need an account to view, so pass
+    if (access_denied(soup)):
+        print('Access Denied')
+        return
+    else:
+        meta = soup.find("dl", class_="work meta group")
+        author = get_authors(soup.find("h3", class_="byline heading"))
+        tags = get_tags(meta)
+        stats = get_stats(meta)
+        if stats[4] == "": stats[4] = "0" # weird edgecase where some works have no word count val
+        if stats[6] == "null": stats[6] = "0" # no comment stat means 0 comments?
+        if stats[8] == "null": stats[8] = "0" # no bookmark stat means 0 bookmarks?
+        title = unidecode(soup.find("h2", class_="title heading").string).strip()
+        
+    #get the fic itself
+    content = soup.find_all("div", class_ = "chapter")
+    if not content:
+        content = [soup.find("div", id = "chapters")] # if single chapter work, do this
+            
 
     # write metadata to table
     #     tags = ['rating', 'category', 'fandom', 'relationship', 'character', 'freeform']
@@ -154,7 +185,7 @@ def write_fic_to_db(fic_id):
     # write fic chaps to table
     # [work id, chapter number, chapter text]
     sql = "INSERT INTO chaps VALUES (%s, %s, %s, %s, %s, %s, %s)"
-    chapters = soup.select("div[class=chapter]")
+    chapters = soup.select("div[id^=chapter-]")
     # case for single-chapter work
     if not chapters:
         title = soup.select_one(".title.heading")
@@ -171,8 +202,11 @@ def write_fic_to_db(fic_id):
         
         chapter = soup.select_one("div[id=chapters]")
         body = chapter.select_one(".userstuff")
-        lines = body.select("p")
-        text = "\n".join([unidecode(line.text) for line in lines])
+        if body:
+            lines = body.select("p")
+            text = "\n".join([unidecode(line.text) for line in lines])
+        else:
+            text = "" 
         
         val = (fic_id, 1, title, summary, notes, endnotes, text)
         cursor.execute(sql, val)
@@ -183,14 +217,25 @@ def write_fic_to_db(fic_id):
             title = chapter.select_one(".title")
             if title: title = title.text
             
-            summary = chapter.select_one("div[id=summary]")
-            if summary: summary = summary.text
-            
-            notes = chapter.select_one("div[id=notes]")
-            if notes: notes = notes.text
-            
-            endnotes = chapter.select_one(".end.notes.module")
-            if endnotes: endnotes = endnotes.text
+            # first chapter has extra info in different place
+            if i == 0:
+                summary = soup.select_one(".summary.module")
+                if summary: summary = summary.text
+                
+                notes = soup.select_one(".notes.module")
+                if notes: notes = notes.text
+                
+                endnotes = soup.select_one(".end.notes.module")
+                if endnotes: endnotes = endnotes.text
+            else:
+                summary = chapter.select_one("div[id=summary]")
+                if summary: summary = summary.text
+                
+                notes = chapter.select_one("div[id=notes]")
+                if notes: notes = notes.text
+                
+                endnotes = chapter.select_one(".end.notes.module")
+                if endnotes: endnotes = endnotes.text
         
             body = chapter.select_one(".userstuff.module")
             lines = body.select("p")
@@ -206,6 +251,9 @@ def write_fic_to_db(fic_id):
 
     db.commit()
     print('Done.')
+    # wait a little to avoid rate limiting
+    sleep(delay)
+
 
 def get_args(): 
     parser = argparse.ArgumentParser(description='Scrape and save some fanfic, given their AO3 IDs.')
@@ -231,11 +279,22 @@ def process_id(fic_id, restart, found):
 
 def main():
     fic_ids, restart, is_csv = get_args()
+    start = False
+    if restart == '': start = True
     
     with open(fic_ids[0], "r+", newline="") as f_in:
         reader = csv.reader(f_in)
-        for row in reader:
-            if not row: continue        
-            write_fic_to_db(row[0])
+        with open(fic_ids[0][:fic_ids[0].find(".")] + "_errors.csv", "a", newline="") as e_out:
+            errorwriter = csv.writer(e_out)
+            
+            for row in reader:
+                if not row: continue
+                
+                # ignore until we reach row to restart scrape from
+                if not start:
+                    if row[0] != restart: continue
+                    start = True
+                
+                write_fic_to_db(row[0], errorwriter)
 
 main()
