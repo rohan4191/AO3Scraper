@@ -26,7 +26,7 @@ def get_single_comment(db, cursor, ficid, comment, parentID):
     if comment.find('h4', class_='heading byline') == None:
         sql = "INSERT INTO comments (fic_id, id, parent_id) VALUES (%s, %s, %s)"
         val = (ficid, commentid, parentID)
-        print("Deleted comment:", val)
+        print("Deleted comment")
         cursor.execute(sql, val)
 
         # save to db after each comment
@@ -35,8 +35,13 @@ def get_single_comment(db, cursor, ficid, comment, parentID):
         return commentid
     
     # Find username
+    # for standard accounts
     if comment.find('h4', class_='heading byline').find('a'):
         username = comment.find('h4', class_='heading byline').find('a').contents[0]
+    # for deleted accounts
+    elif "Account Deleted" in comment.find('h4', class_='heading byline').text:
+        username = None
+    # for guest accounts
     else:
         username = comment.find("h4", class_="heading byline").find("span").text
 
@@ -70,12 +75,8 @@ def get_single_comment(db, cursor, ficid, comment, parentID):
     text = "\n".join(text)
 
     # print out comment data
-    # if parent ID is 0 means that no parent comment, so set null
-    if parentID == 0:
-        parentID = None
     sql = "INSERT INTO comments VALUES (%s, %s, %s, %s, %s, %s, %s)"
     val = (ficid, commentid, chapternumber, username, dateObj, parentID, text)
-    print(val)
     cursor.execute(sql, val)
 
     # save to db after each comment
@@ -106,7 +107,7 @@ def get_comment_thread(db, cursor, ficid, thread, parentID):
                     sleep(60)
             # for other errors, halt scraping
             if 400 <= status:
-                print("Error:", status, ", halting scraping on fic", ficid)
+                print("Error:", status, ", halting scraping on fic:", ficid)
                 return
             src = req.text
             soup = BeautifulSoup(src, 'html.parser')
@@ -151,10 +152,12 @@ def get_comment_page(db, cursor, ficid, pagenum):
         print(f"Fic {ficid} has no comments on page {pagenum}")
         return
     
-    get_comment_thread(db, cursor, ficid, thread, 0)
+    get_comment_thread(db, cursor, ficid, thread, None)
 
 
 def get_all_comments(db, cursor, ficid, restart_pagenum):
+    # TODO: sql query to see if fic has any comments at all, and ignore if not
+
     url = 'http://archiveofourown.org/works/'+str(ficid)+'?view_adult=true&amp;view_full_work=true&show_comments=true'
     
     status = 429
@@ -178,9 +181,10 @@ def get_all_comments(db, cursor, ficid, restart_pagenum):
         # get max page num
         numpages = int(soup.find('ol', class_='pagination actions').findChildren("li", recursive=False)[-2].text)
         # get comments for each page
-        for i in range(numpages):
-            get_comment_page(db, cursor, ficid, restart_pagenum + i)
-            
+        i = int(restart_pagenum)
+        while i < numpages:
+            get_comment_page(db, cursor, ficid, i)
+            i += 1
     # if only one page of comments
     else:
         get_comment_page(db, cursor, ficid, 1)
@@ -195,7 +199,7 @@ def get_args():
         '--restart', default='', 
         help='work_id to start at from within a csv')
     parser.add_argument(
-        '--page', default=0, 
+        '--page', default=1,
         help='page number to restart from')
     args = parser.parse_args()
     fic_ids = args.ids
@@ -217,9 +221,9 @@ def main():
     fic_ids, restart, is_csv, page = get_args()
     
     if not is_csv:
-        print("Not csv")
-        print("Page arg:", page)
-        get_all_comments(db, cursor, fic_ids[0])
+        print("Not CSV")
+        print("Starting from page:", page)
+        get_all_comments(db, cursor, fic_ids[0], page)
         return
 
     start = False
@@ -229,17 +233,18 @@ def main():
         print("CSV")
         reader = csv.reader(f_in)
         for row in reader:
-            if type(row[0]) != int:
-                print("Row not of type int:", row)
-                continue
-            print("Page:", page)
             if not row: continue
             
             # ignore until we reach row to restart scrape from
             if not start:
                 if row[0] != restart: continue
                 start = True
-            
+
+            if not row[0].isnumeric():
+                print("Passing on non-numeric ID:", row[0])
+                continue
+
+            print("Starting from page:", page, "for fic:", row[0])
             # get all comments for fic id
             get_all_comments(db, cursor, row[0], page)
             page = 1

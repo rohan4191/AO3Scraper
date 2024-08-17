@@ -51,13 +51,19 @@ def get_stats(meta):
         stats = new_stats
 
     stats[0] = stats[0].rstrip().lstrip() #language has weird whitespace characters
+
     #add a custom completed/updated field
     status  = meta.find("dt", class_="status")
     if not status: status = 'Completed' 
     else: status = status.text.strip(':')
     stats.insert(2, status)
 
-    return stats      
+    # if numeric stats are null, means 0 (I think)
+    for i in range(6, 10):
+        if stats[i] == "null":
+            stats[i] = "0"
+    
+    return stats
 
 def get_tag_info(category, meta):
     '''
